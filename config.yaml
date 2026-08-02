@@ -17,6 +17,10 @@ html_sources:
   - name: Sport5
     url: "https://www.sport5.co.il/world.aspx?FolderID=4439"   # Israeli soccer
     link_regex: 'articles\.aspx\?FolderID=\d+&(?:amp;)?docID=\d+'
+  - name: "מכבי חיפה - האתר הרשמי"
+    url: "https://www.mhaifafc.com/news"
+    link_regex: '/news/\d+'
+    always_relevant: true    # club's own site: everything is relevant, skip keyword filter
 
 # An item is posted only if it contains a keyword AND no exclusion.
 keywords:

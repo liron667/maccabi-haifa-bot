@@ -89,12 +89,15 @@ def collect_html(sources, _cutoff):
                 if not link.startswith("http"):
                     link = requests.compat.urljoin(src["url"], link)
                 title = re.sub(r"\s+", " ", re.sub("<[^>]+>", " ", a.group(2))).strip()
+                title = html.unescape(title)
+                title = re.sub(r"\s*\d{1,2}/\d{1,2}/\d{4}.*$", "", title).strip()
                 if not title or link in seen_ids:
                     continue
                 seen_ids.add(link)
                 items.append({
                     "id": link, "title": title, "summary": "",
                     "link": link, "source": src["name"],
+                    "always": src.get("always_relevant", False),
                 })
         except Exception as ex:
             print(f"[warn] HTML {src.get('name')} failed: {ex}")
@@ -173,7 +176,9 @@ def main():
     for item in items:
         if item["id"] in seen:
             continue
-        if not matches(f"{item['title']} {item['summary']}", keywords, exclusions):
+        if not item.get("always") and not matches(
+            f"{item['title']} {item['summary']}", keywords, exclusions
+        ):
             continue
         if DRY_RUN:
             print(f"[would post] {item['source']}: {item['title']}\n             {item['link']}")
