@@ -111,6 +111,16 @@ def collect_telegram(channels, cutoff):
         return []
     from telethon.sync import TelegramClient
     from telethon.sessions import StringSession
+    from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
+
+    def has_link(msg):  # club promos/ads carry a link or button; real news is plain text
+        if msg.buttons:
+            return True
+        if msg.entities and any(
+            isinstance(e, (MessageEntityUrl, MessageEntityTextUrl)) for e in msg.entities
+        ):
+            return True
+        return "http" in msg.message.lower()
 
     items = []
     try:
@@ -122,6 +132,8 @@ def collect_telegram(channels, cutoff):
                         if msg.date < cutoff:
                             break
                         if not msg.message:
+                            continue
+                        if has_link(msg):  # skip channel self-promo/ads
                             continue
                         items.append({
                             "id": f"{ch}:{msg.id}",
