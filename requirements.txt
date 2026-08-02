@@ -1,0 +1,5 @@
+telethon
+feedparser
+requests
+PyYAML
+python-dotenv

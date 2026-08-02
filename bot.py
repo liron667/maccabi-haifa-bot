@@ -1,0 +1,193 @@
+"""Maccabi Haifa news bot: fetch -> keyword filter -> post to Telegram.
+
+    python bot.py --dry-run   # print what it would post, change nothing
+    python bot.py             # post new matching items and update seen.json
+"""
+import html
+import json
+import os
+import re
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import feedparser
+import requests
+import yaml
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).parent
+load_dotenv(ROOT / ".env")
+DRY_RUN = "--dry-run" in sys.argv
+UA = "Mozilla/5.0 (compatible; maccabi-haifa-bot)"
+
+
+def load_config():
+    with open(ROOT / "config.yaml", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def load_seen():
+    p = ROOT / "seen.json"
+    return json.loads(p.read_text(encoding="utf-8") or "{}") if p.exists() else {}
+
+
+def save_seen(seen):
+    (ROOT / "seen.json").write_text(
+        json.dumps(seen, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def matches(text, keywords, exclusions):
+    t = text.lower()
+    if any(x.lower() in t for x in exclusions):
+        return False
+    return any(k.lower() in t for k in keywords)
+
+
+def within_lookback(when, cutoff):
+    return when is None or when >= cutoff
+
+
+# ---- sources: each returns list of {id, title, summary, link, source} ----
+
+def collect_rss(feeds, cutoff):
+    items = []
+    for feed in feeds or []:
+        try:
+            parsed = feedparser.parse(feed["url"])
+            for e in parsed.entries:
+                when = None
+                if getattr(e, "published_parsed", None):
+                    when = datetime(*e.published_parsed[:6], tzinfo=timezone.utc)
+                if not within_lookback(when, cutoff):
+                    continue
+                link = e.get("link", "")
+                items.append({
+                    "id": e.get("id") or link,
+                    "title": e.get("title", ""),
+                    "summary": re.sub("<[^>]+>", " ", e.get("summary", "")),
+                    "link": link,
+                    "source": feed["name"],
+                })
+        except Exception as ex:
+            print(f"[warn] RSS {feed.get('name')} failed: {ex}")
+    return items
+
+
+def collect_html(sources, _cutoff):
+    items = []
+    for src in sources or []:
+        try:
+            page = requests.get(src["url"], headers={"User-Agent": UA}, timeout=20).text
+            seen_ids = set()
+            for a in re.finditer(
+                r'<a[^>]+href="([^"]*' + src["link_regex"] + r'[^"]*)"[^>]*>(.*?)</a>',
+                page, re.IGNORECASE | re.DOTALL,
+            ):
+                link = html.unescape(a.group(1))
+                if not link.startswith("http"):
+                    link = requests.compat.urljoin(src["url"], link)
+                title = re.sub(r"\s+", " ", re.sub("<[^>]+>", " ", a.group(2))).strip()
+                if not title or link in seen_ids:
+                    continue
+                seen_ids.add(link)
+                items.append({
+                    "id": link, "title": title, "summary": "",
+                    "link": link, "source": src["name"],
+                })
+        except Exception as ex:
+            print(f"[warn] HTML {src.get('name')} failed: {ex}")
+    return items
+
+
+def collect_telegram(channels, cutoff):
+    api_id = os.getenv("TELEGRAM_API_ID")
+    session = os.getenv("TELETHON_SESSION")
+    if not (channels and api_id and session):
+        return []
+    from telethon.sync import TelegramClient
+    from telethon.sessions import StringSession
+
+    items = []
+    try:
+        with TelegramClient(StringSession(session), int(api_id),
+                            os.getenv("TELEGRAM_API_HASH")) as client:
+            for ch in channels:
+                try:
+                    for msg in client.iter_messages(ch, limit=40):
+                        if msg.date < cutoff:
+                            break
+                        if not msg.message:
+                            continue
+                        items.append({
+                            "id": f"{ch}:{msg.id}",
+                            "title": msg.message.split("\n")[0][:200],
+                            "summary": msg.message,
+                            "link": f"https://t.me/{ch}/{msg.id}",
+                            "source": f"Telegram @{ch}",
+                        })
+                except Exception as ex:
+                    print(f"[warn] Telegram {ch} failed: {ex}")
+    except Exception as ex:
+        print(f"[warn] Telegram login failed: {ex}")
+    return items
+
+
+def post(item, token, channel):
+    text = (f"<b>{html.escape(item['title'])}</b>\n\n"
+            f"{html.escape(item['link'])}\n\n"
+            f"<i>{html.escape(item['source'])}</i>")
+    r = requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data={"chat_id": channel, "text": text, "parse_mode": "HTML"},
+        timeout=30,
+    )
+    r.raise_for_status()
+
+
+def prune(seen, days):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    for k in list(seen):
+        try:
+            if datetime.fromisoformat(seen[k]) < cutoff:
+                del seen[k]
+        except ValueError:
+            pass
+
+
+def main():
+    cfg = load_config()
+    seen = load_seen()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=cfg.get("lookback_hours", 3))
+
+    items = (collect_rss(cfg.get("rss_feeds"), cutoff)
+             + collect_html(cfg.get("html_sources"), cutoff)
+             + collect_telegram(cfg.get("telegram_channels"), cutoff))
+
+    keywords, exclusions = cfg["keywords"], cfg.get("exclusions", [])
+    token = os.getenv("BOT_TOKEN")
+    channel = os.getenv("TARGET_CHANNEL_ID") or cfg.get("target_channel_id")
+
+    posted = 0
+    for item in items:
+        if item["id"] in seen:
+            continue
+        if not matches(f"{item['title']} {item['summary']}", keywords, exclusions):
+            continue
+        if DRY_RUN:
+            print(f"[would post] {item['source']}: {item['title']}\n             {item['link']}")
+        else:
+            post(item, token, channel)
+            seen[item["id"]] = datetime.now(timezone.utc).isoformat()
+        posted += 1
+
+    if not DRY_RUN:
+        prune(seen, cfg.get("seen_retention_days", 30))
+        save_seen(seen)
+    print(f"{'[dry-run] ' if DRY_RUN else ''}{posted} new matching item(s) from "
+          f"{len(items)} fetched.")
+
+
+if __name__ == "__main__":
+    main()

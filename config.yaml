@@ -1,0 +1,29 @@
+# What to monitor and what counts as "Maccabi Haifa".
+# Edit freely. TARGET_CHANNEL_ID env var (or .env) overrides target_channel_id below.
+
+target_channel_id: "-1004410313151"
+lookback_hours: 3          # only consider items newer than this (dedup handles the rest)
+seen_retention_days: 30    # how long to remember posted items
+
+telegram_channels:
+  - maccabihaifa_fc        # read with your Telegram user account (Telethon)
+
+rss_feeds:
+  - name: ONE
+    url: https://www.one.co.il/rss
+
+# Sites with no RSS: scrape a listing page for article links (title + url).
+html_sources:
+  - name: Sport5
+    url: "https://www.sport5.co.il/world.aspx?FolderID=4439"   # Israeli soccer
+    link_regex: 'articles\.aspx\?FolderID=\d+&(?:amp;)?docID=\d+'
+
+# An item is posted only if it contains a keyword AND no exclusion.
+keywords:
+  - "מכבי חיפה"
+  - "Maccabi Haifa"
+  - "הירוקים"
+
+exclusions:
+  - "מכבי תל אביב"
+  - "מכבי ת\"א"

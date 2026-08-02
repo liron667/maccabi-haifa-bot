@@ -1,0 +1,32 @@
+name: hourly
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python bot.py
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELETHON_SESSION: ${{ secrets.TELETHON_SESSION }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          TARGET_CHANNEL_ID: ${{ secrets.TARGET_CHANNEL_ID }}
+      - name: Persist seen.json
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add seen.json
+          git diff --staged --quiet || git commit -m "update seen.json [skip ci]"
+          git push
