@@ -150,9 +150,13 @@ def collect_telegram(channels, cutoff):
 
 
 def post(item, token, channel):
-    text = (f"<b>{html.escape(item['title'])}</b>\n\n"
-            f"{html.escape(item['link'])}\n\n"
-            f"<i>{html.escape(item['source'])}</i>")
+    if item["link"].startswith("https://t.me/"):
+        # Telegram-sourced: post the text only, no t.me link / @mention.
+        text = html.escape((item.get("summary") or item["title"])[:3800])
+    else:
+        text = (f"<b>{html.escape(item['title'])}</b>\n\n"
+                f"{html.escape(item['link'])}\n\n"
+                f"<i>{html.escape(item['source'])}</i>")
     r = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data={"chat_id": channel, "text": text, "parse_mode": "HTML"},
