@@ -149,10 +149,61 @@ def collect_telegram(channels, cutoff):
     return items
 
 
+def fetch_article_text(url):
+    """Best-effort article body: og meta + paragraph text. Empty string on failure."""
+    try:
+        doc = requests.get(url, headers={"User-Agent": UA}, timeout=15).text
+    except Exception:
+        return ""
+
+    def meta(prop):
+        m = re.search(
+            r'<meta[^>]+(?:property|name)="' + prop + r'"[^>]+content="([^"]*)"', doc, re.I
+        )
+        return html.unescape(m.group(1)) if m else ""
+
+    parts = [meta("og:title"), meta("og:description")]
+    for p in re.findall(r"<p[^>]*>(.*?)</p>", doc, re.I | re.S):
+        t = html.unescape(re.sub("<[^>]+>", " ", p)).strip()
+        if len(t) > 40:
+            parts.append(t)
+    return re.sub(r"\s+", " ", " ".join(parts)).strip()[:2000]
+
+
+def ai_message(title, text, ai_cfg):
+    """Ask Gemini for a catchy Hebrew headline + summary. None if disabled/failed."""
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        return None
+    model = ai_cfg.get("model", "gemini-2.0-flash")
+    team = ai_cfg.get("team", "")
+    prompt = (
+        f"אתה עורך תוכן לערוץ טלגרם בעברית בנושא {team}. בהינתן כותרת וטקסט של כתבה, "
+        "כתוב הודעה קצרה וקולעת בעברית: שורה ראשונה = כותרת קליטה (ללא סימני עיצוב), "
+        "אחריה שורת רווח, ואז סיכום של 1-2 משפטים. אל תמציא עובדות, ואל תוסיף קישורים.\n\n"
+        f"כותרת: {title}\n\nטקסט: {text}"
+    )
+    try:
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            params={"key": key},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip() or None
+    except Exception as ex:
+        print(f"[warn] AI failed: {ex}")
+        return None
+
+
 def post(item, token, channel):
     if item["link"].startswith("https://t.me/"):
         # Telegram-sourced: post the text only, no t.me link / @mention.
         text = html.escape((item.get("summary") or item["title"])[:3800])
+    elif item.get("ai_text"):
+        head, _, body = item["ai_text"].partition("\n")
+        text = f"<b>{html.escape(head.strip())}</b>\n\n{html.escape(body.strip())}\n\n{html.escape(item['link'])}"
     else:
         text = (f"<b>{html.escape(item['title'])}</b>\n\n"
                 f"{html.escape(item['link'])}\n\n"
@@ -185,6 +236,7 @@ def main():
              + collect_telegram(cfg.get("telegram_channels"), cutoff))
 
     keywords, exclusions = cfg["keywords"], cfg.get("exclusions", [])
+    ai_cfg = cfg.get("ai") or {}
     token = os.getenv("BOT_TOKEN")
     channel = os.getenv("TARGET_CHANNEL_ID") or cfg.get("target_channel_id")
 
@@ -196,8 +248,12 @@ def main():
             f"{item['title']} {item['summary']}", keywords, exclusions
         ):
             continue
+        if ai_cfg.get("enabled") and not item["link"].startswith("https://t.me/"):
+            body = fetch_article_text(item["link"]) or item.get("summary", "")
+            item["ai_text"] = ai_message(item["title"], body, ai_cfg)
         if DRY_RUN:
-            print(f"[would post] {item['source']}: {item['title']}\n             {item['link']}")
+            preview = item.get("ai_text") or f"{item['title']}"
+            print(f"[would post] {item['source']}:\n{preview}\n  {item['link']}\n")
         else:
             post(item, token, channel)
             seen[item["id"]] = datetime.now(timezone.utc).isoformat()
