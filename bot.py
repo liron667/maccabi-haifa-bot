@@ -186,12 +186,13 @@ def ai_message(title, text, ai_cfg):
     try:
         r = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            params={"key": key},
+            headers={"x-goog-api-key": key},
             json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=30,
+            timeout=90,
         )
         r.raise_for_status()
-        return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip() or None
+        parts = r.json()["candidates"][0]["content"]["parts"]
+        return "".join(p.get("text", "") for p in parts).strip() or None
     except Exception as ex:
         print(f"[warn] AI failed: {ex}")
         return None
