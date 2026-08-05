@@ -179,8 +179,8 @@ def ai_message(title, text, ai_cfg):
     team = ai_cfg.get("team", "")
     prompt = (
         f"אתה עורך תוכן לערוץ טלגרם בעברית בנושא {team}. בהינתן כותרת וטקסט של כתבה, "
-        "כתוב הודעה קצרה וקולעת בעברית: שורה ראשונה = כותרת קליטה (ללא סימני עיצוב), "
-        "אחריה שורת רווח, ואז סיכום של 1-2 משפטים. אל תמציא עובדות, ואל תוסיף קישורים.\n\n"
+        "כתוב הודעה קצרה וקולעת בעברית: שורה ראשונה = כותרת קליטה שמתחילה באימוג'י אחד מתאים, "
+        "אחריה שורת רווח, ואז סיכום של 1-2 משפטים. אל תמציא עובדות, ואל תוסיף קישורים או האשטגים.\n\n"
         f"כותרת: {title}\n\nטקסט: {text}"
     )
     try:
@@ -205,6 +205,8 @@ def post(item, token, channel):
     elif item.get("ai_text"):
         head, _, body = item["ai_text"].partition("\n")
         text = f"<b>{html.escape(head.strip())}</b>\n\n{html.escape(body.strip())}\n\n{html.escape(item['link'])}"
+        if item.get("hashtags"):
+            text += "\n\n" + html.escape(" ".join(item["hashtags"]))
     else:
         text = (f"<b>{html.escape(item['title'])}</b>\n\n"
                 f"{html.escape(item['link'])}\n\n"
@@ -252,6 +254,8 @@ def main():
         if ai_cfg.get("enabled") and not item["link"].startswith("https://t.me/"):
             body = fetch_article_text(item["link"]) or item.get("summary", "")
             item["ai_text"] = ai_message(item["title"], body, ai_cfg)
+            if item.get("ai_text"):
+                item["hashtags"] = ai_cfg.get("hashtags", [])
         if DRY_RUN:
             preview = item.get("ai_text") or f"{item['title']}"
             print(f"[would post] {item['source']}:\n{preview}\n  {item['link']}\n")

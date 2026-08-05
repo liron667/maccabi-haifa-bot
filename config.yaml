@@ -10,6 +10,7 @@ ai:
   enabled: true
   model: gemini-flash-latest
   team: "מכבי חיפה"
+  hashtags: ["#מכבי_חיפה", "#כדורגל"]
 
 telegram_channels:
   - maccabihaifa_fc        # read with your Telegram user account (Telethon)
