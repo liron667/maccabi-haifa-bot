@@ -178,8 +178,9 @@ def ai_message(title, text, ai_cfg):
     model = ai_cfg.get("model", "gemini-2.0-flash")
     team = ai_cfg.get("team", "")
     prompt = (
-        f"אתה עורך תוכן לערוץ טלגרם בעברית בנושא {team}. בהינתן כותרת וטקסט של כתבה, "
-        "כתוב הודעה קצרה וקולעת בעברית: שורה ראשונה = כותרת קליטה שמתחילה באימוג'י אחד מתאים, "
+        f"אתה עורך תוכן לערוץ טלגרם בעברית בנושא {team} (כדורגל). בהינתן כותרת וטקסט של כתבה: "
+        "אם הכתבה אינה עוסקת בכדורגל (למשל כדורסל, כדוריד או ענף ספורט אחר), החזר בדיוק את המילה SKIP וכלום מלבדה. "
+        "אחרת, כתוב הודעה קצרה וקולעת בעברית: שורה ראשונה = כותרת קליטה שמתחילה באימוג'י אחד מתאים, "
         "אחריה שורת רווח, ואז סיכום של 1-2 משפטים. אל תמציא עובדות, ואל תוסיף קישורים או האשטגים.\n\n"
         f"כותרת: {title}\n\nטקסט: {text}"
     )
@@ -253,8 +254,16 @@ def main():
             continue
         if ai_cfg.get("enabled") and not item["link"].startswith("https://t.me/"):
             body = fetch_article_text(item["link"]) or item.get("summary", "")
-            item["ai_text"] = ai_message(item["title"], body, ai_cfg)
-            if item.get("ai_text"):
+            ai_text = ai_message(item["title"], body, ai_cfg)
+            if ai_text and ai_text.strip().upper().startswith("SKIP"):
+                # AI judged this off-topic (e.g. basketball) — remember and skip.
+                if DRY_RUN:
+                    print(f"[skip non-soccer] {item['source']}: {item['title']}")
+                else:
+                    seen[item["id"]] = datetime.now(timezone.utc).isoformat()
+                continue
+            item["ai_text"] = ai_text
+            if ai_text:
                 item["hashtags"] = ai_cfg.get("hashtags", [])
         if DRY_RUN:
             preview = item.get("ai_text") or f"{item['title']}"
