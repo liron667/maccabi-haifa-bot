@@ -1,7 +1,7 @@
 # What to monitor and what counts as "Maccabi Haifa".
 # Edit freely. TARGET_CHANNEL_ID env var (or .env) overrides target_channel_id below.
 
-target_channel_id: "-1004410313151"
+target_channel_id: ""      # set via TARGET_CHANNEL_ID secret / .env
 lookback_hours: 3          # only consider items newer than this (dedup handles the rest)
 seen_retention_days: 30    # how long to remember posted items
 
